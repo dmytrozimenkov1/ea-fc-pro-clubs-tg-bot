@@ -95,35 +95,38 @@ def extract_match_info(match: Match, selected_club_id: str) -> Dict[str, Any]:
 
     # Teams and Goals
     teams = []
-    for club_id, club_info in match.clubs.items():
+    for club_id, club_data in match.clubs.items():
         try:
-            goals_scored = int(club_info.goals)
+            goals_scored = int(club_data.goals)
         except ValueError:
             goals_scored = 0
         team_data = {
-            'team_name': club_info.details.name,
+            'club_id': club_id,  # Add club_id here
+            'team_name': club_data.details.name,
             'goals_scored': goals_scored
         }
         teams.append(team_data)
     match_info['teams'] = teams
 
     # Determine the Result for the Selected Club
-    selected_club_name = match.clubs[str(selected_club_id)].details.name  # Ensure club_id is string
-    selected_goals = 0
-    opponent_goals = 0
-
-    for team in teams:
-        if team['team_name'] == selected_club_name:
-            selected_goals = team['goals_scored']
-        else:
-            opponent_goals = team['goals_scored']
-
-    if selected_goals > opponent_goals:
-        match_info['result'] = 'win'
-    elif selected_goals < opponent_goals:
-        match_info['result'] = 'loss'
+    selected_club = next(
+        (team for team in teams if team['club_id'] == selected_club_id), None
+    )
+    if not selected_club:
+        match_info['result'] = 'unknown'
     else:
-        match_info['result'] = 'draw'
+        selected_goals = selected_club['goals_scored']
+        opponent = next(
+            (team for team in teams if team['club_id'] != selected_club_id), None
+        )
+        opponent_goals = opponent['goals_scored'] if opponent else 0
+
+        if selected_goals > opponent_goals:
+            match_info['result'] = 'win'
+        elif selected_goals < opponent_goals:
+            match_info['result'] = 'loss'
+        else:
+            match_info['result'] = 'draw'
 
     # Man of the Match (MOTM) Details
     mom_players = []
@@ -142,8 +145,8 @@ def extract_match_info(match: Match, selected_club_id: str) -> Dict[str, Any]:
     match_info['man_of_the_match'] = mom_players if mom_players else None
 
     # Winner by Disconnect for the Selected Club
-    if str(selected_club_id) in match.clubs:
-        winner_by_dnf = match.clubs[str(selected_club_id)].winnerByDnf
+    if selected_club_id in match.clubs:
+        winner_by_dnf = match.clubs[selected_club_id].winnerByDnf
         match_info['winner_by_disconnect'] = True if winner_by_dnf == "1" else False
     else:
         match_info['winner_by_disconnect'] = None  # Club not part of this match
@@ -211,15 +214,21 @@ def get_matches_info(club_name: str, platform: Platform) -> Optional[List[Dict[s
 
 # main.py
 
-def format_matches(matches: List[Dict[str, Any]], club_name: str, overall_stats: Optional[OverallStats] = None) -> str:
+def format_matches(
+        matches: List[Dict[str, Any]],
+        club_name: str,
+        overall_stats: Optional[OverallStats] = None,
+        opposing_skill_ratings: Dict[str, Any] = {}
+) -> str:
     """
     Formats the list of match dictionaries into a structured text with indicators and separators,
-    including overall club stats if provided.
+    including overall club stats and opposing teams' skill ratings.
 
     Args:
         matches (List[Dict[str, Any]]): The list of match information dictionaries.
         club_name (str): The name of the selected club.
         overall_stats (Optional[OverallStats]): The overall statistics of the club.
+        opposing_skill_ratings (Dict[str, Any]): Mapping of opposing club IDs to their skill ratings.
 
     Returns:
         str: The formatted string containing overall stats and all matches with indicators and separators.
@@ -251,6 +260,7 @@ def format_matches(matches: List[Dict[str, Any]], club_name: str, overall_stats:
         # Append to formatted_matches
         formatted_matches.append(overall_stats_line)
         formatted_matches.append(wins_draws_losses)
+        formatted_matches.append("_____________________")
 
     # Iterate through each match and format the information
     for match in matches:
@@ -262,25 +272,35 @@ def format_matches(matches: List[Dict[str, Any]], club_name: str, overall_stats:
             timestamp_line = f"{match.get('relative_time', '')}"
             formatted_matches.append(team_line)
             formatted_matches.append(timestamp_line)
+            formatted_matches.append("_____________________")
             continue
 
-        team1 = teams[0]['team_name']
-        team2 = teams[1]['team_name']
-        team1_goals = teams[0]['goals_scored']
-        team2_goals = teams[1]['goals_scored']
+        team1 = teams[0]
+        team2 = teams[1]
+
+        team1_name = team1['team_name']
+        team2_name = team2['team_name']
+        team1_goals = team1['goals_scored']
+        team2_goals = team2['goals_scored']
+        team1_id = team1['club_id']
+        team2_id = team2['club_id']
 
         score = f"{team1_goals}:{team2_goals}"
 
         # Determine which team is the selected club
-        if team1.lower() == club_name.lower():
-            display_team1 = f"<b><u>{team1}</u></b>"
-            display_team2 = team2
-        elif team2.lower() == club_name.lower():
-            display_team1 = team1
-            display_team2 = f"<b><u>{team2}</u></b>"
+        if team1_name.lower() == club_name.lower():
+            display_team1 = f"<b><u>{team1_name}</u></b>"
+            # Get opponent's skill rating
+            opponent_skill = opposing_skill_ratings.get(team2_id, "N/A")
+            display_team2 = f"{team2_name} ({opponent_skill})"
+        elif team2_name.lower() == club_name.lower():
+            display_team2 = f"<b><u>{team2_name}</u></b>"
+            # Get opponent's skill rating
+            opponent_skill = opposing_skill_ratings.get(team1_id, "N/A")
+            display_team1 = f"{team1_name} ({opponent_skill})"
         else:
-            display_team1 = team1
-            display_team2 = team2
+            display_team1 = team1_name
+            display_team2 = team2_name
 
         # Format the team line
         team_line = f"{TEAM_INDENT}{display_team1} {score} {display_team2}"
@@ -294,12 +314,13 @@ def format_matches(matches: List[Dict[str, Any]], club_name: str, overall_stats:
                 mom_rating = mom['rating']
                 mom_team_name = mom['team_name']
 
-                if mom_team_name.lower() == team1.lower():
+                if mom_team_name.lower() == team1_name.lower():
                     # Align MOTM under team1
                     motm_indent = " " * (len(TEAM_INDENT) + len(display_team1) + 1 + len(score) + 1)
                 else:
                     # Align MOTM under team2
-                    motm_indent = " " * (len(TEAM_INDENT) + len(display_team1) + 1 + len(score) + 1 + len(team2))
+                    motm_indent = " " * (
+                                len(TEAM_INDENT) + len(display_team1) + 1 + len(score) + 1 + len(display_team2))
 
                 motm_line = f"{motm_indent}{mom_player} - {mom_rating}"
                 motm_lines.append(motm_line)
@@ -327,9 +348,12 @@ def format_matches(matches: List[Dict[str, Any]], club_name: str, overall_stats:
 
         # Append to the list of formatted matches
         formatted_matches.append(formatted_match)
+        formatted_matches.append("_____________________")
 
-    # Skip the first separator
-    return "\n_____________________\n".join(formatted_matches)
+    # Skip the last separator
+    final_output = "\n".join(formatted_matches).rstrip("_____________________\n")
+    return final_output
+
 
 def main():
     """

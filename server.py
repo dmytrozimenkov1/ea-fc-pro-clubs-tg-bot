@@ -71,12 +71,38 @@ def notify():
                 if not overall_stats:
                     overall_stats_message = "⚠️ No overall stats found for the specified club."
                     logger.warning(overall_stats_message)
-                    # You can choose to include or exclude this message
-                    # For consistency, we'll proceed without overall_stats
+                    # Proceed without overall_stats
                     overall_stats = None
 
-                # Format the matches with indicators and separators, including overall stats
-                message = format_matches(matches_info, team_name, overall_stats)
+                # **New Steps to Include Opposing Teams' Skill Ratings**
+
+                # 1. Collect all unique opposing club IDs
+                opposing_club_ids = set()
+                for match in matches_info:
+                    for team in match['teams']:
+                        if team['club_id'] != selected_club_id:
+                            opposing_club_ids.add(team['club_id'])
+
+                # 2. Fetch skill ratings for opposing clubs
+                opposing_skill_ratings = {}
+                for club_id in opposing_club_ids:
+                    club_stats = get_overall_stats(club_id, platform)
+                    if club_stats:
+                        try:
+                            skill_rating = int(club_stats.skillRating)
+                        except ValueError:
+                            skill_rating = "N/A"
+                        opposing_skill_ratings[club_id] = skill_rating
+                    else:
+                        opposing_skill_ratings[club_id] = "N/A"
+
+                # 3. Format the matches with indicators and separators, including overall stats and opposing skill ratings
+                message = format_matches(
+                    matches_info,
+                    team_name,
+                    overall_stats,
+                    opposing_skill_ratings  # Pass the skill ratings mapping
+                )
 
     except Exception as e:
         logger.error(f"Error fetching match information: {e}")
