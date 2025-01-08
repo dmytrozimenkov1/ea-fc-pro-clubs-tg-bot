@@ -38,13 +38,7 @@ def get_overall_stats(club_id: str, platform: Platform) -> Optional[OverallStats
 
 def get_relative_time(match_datetime: datetime) -> str:
     """
-    Calculates the relative time between now and the match time.
-
-    Args:
-        match_datetime (datetime): The datetime of the match.
-
-    Returns:
-        str: A string representing the relative time (e.g., "1 hour 15 mins ago").
+    Calculates the relative time between now and the match time (short format).
     """
     now = datetime.now()
     difference = now - match_datetime
@@ -60,15 +54,14 @@ def get_relative_time(match_datetime: datetime) -> str:
 
         if hours > 0:
             if minutes > 0:
-                return f"{hours} hours {minutes} mins ago"
+                return f"{hours}h {minutes}m ago"
             else:
-                return f"{hours} hours ago"
+                return f"{hours}h ago"
         else:
             if minutes > 0:
-                return f"{minutes} mins ago"
+                return f"{minutes}m ago"
             else:
                 return "just now"
-
 
 def extract_match_info(match: Match, selected_club_id: str) -> Dict[str, Any]:
     """
@@ -153,7 +146,6 @@ def extract_match_info(match: Match, selected_club_id: str) -> Dict[str, Any]:
 
     return match_info
 
-
 def get_matches_info(club_name: str, platform: Platform) -> Optional[List[Dict[str, Any]]]:
     """
     Fetches and extracts match information for a given club.
@@ -214,6 +206,9 @@ def get_matches_info(club_name: str, platform: Platform) -> Optional[List[Dict[s
 
 # main.py
 
+import prettytable as pt
+from typing import List, Dict, Any, Optional
+from fc_clubs_api.models import OverallStats
 def format_matches(
         matches: List[Dict[str, Any]],
         club_name: str,
@@ -221,58 +216,30 @@ def format_matches(
         opposing_skill_ratings: Dict[str, Any] = {}
 ) -> str:
     """
-    Formats the list of match dictionaries into a structured text with indicators and separators,
-    including overall club stats and opposing teams' skill ratings.
-
-    Args:
-        matches (List[Dict[str, Any]]): The list of match information dictionaries.
-        club_name (str): The name of the selected club.
-        overall_stats (Optional[OverallStats]): The overall statistics of the club.
-        opposing_skill_ratings (Dict[str, Any]): Mapping of opposing club IDs to their skill ratings.
-
-    Returns:
-        str: The formatted string containing overall stats and all matches with indicators and separators.
+    Formats the list of match dictionaries into a structured output with variable "sub-rows".
     """
-    formatted_matches = []
+    formatted_output = []
 
-    # Define the emoji indicators
-    indicators = {
-        'win': '🟩',
-        'loss': '🟥',
-        'draw': '⬜'
-    }
-
-    # Define fixed indentation for team names and score
-    TEAM_INDENT = ""  # 4 spaces for indentation
-
-    # If overall_stats is provided, format and add it
     if overall_stats:
-        # Create the indicators line based on last 5 matches
+        indicators = {
+            'win': '🟩',
+            'loss': '🟥',
+            'draw': '⬜'
+        }
         last_5_matches = matches[:5]
         last_5_results = [match['result'] for match in reversed(last_5_matches)]
         emojis = [indicators.get(result, '') for result in last_5_results]
         indicators_line = " ".join(emojis)
 
-        # Format overall stats
-        overall_stats_line = f"{indicators_line}  {overall_stats.skillRating}"
-        wins_draws_losses = f"{overall_stats.wins}/{overall_stats.ties}/{overall_stats.losses}"
+        overall_stats_line = f"{indicators_line}  Skill Rating: {overall_stats.skillRating}"
+        wins_draws_losses = f"Wins/Draws/Losses: {overall_stats.wins}/{overall_stats.ties}/{overall_stats.losses}"
+        formatted_output.append(overall_stats_line)
+        formatted_output.append(wins_draws_losses)
+        formatted_output.append("-" * 50)
 
-        # Append to formatted_matches
-        formatted_matches.append(overall_stats_line)
-        formatted_matches.append(wins_draws_losses)
-        formatted_matches.append("_____________________")
-
-    # Iterate through each match and format the information
     for match in matches:
-        # Extract team information
         teams = match.get('teams', [])
         if len(teams) < 2:
-            team_line = "Incomplete team information."
-            motm_line = ""
-            timestamp_line = f"{match.get('relative_time', '')}"
-            formatted_matches.append(team_line)
-            formatted_matches.append(timestamp_line)
-            formatted_matches.append("_____________________")
             continue
 
         team1 = teams[0]
@@ -287,74 +254,97 @@ def format_matches(
 
         score = f"{team1_goals}:{team2_goals}"
 
-        # Determine which team is the selected club
+        searched_team_name = ""
+        opponent_team_name = ""
+        searched_team_rating_value = None
+        opponent_team_rating_value = None
+        motm_name = None
+        motm_rating = None
+        opponent_motm_name = None
+        opponent_motm_rating = None
+
         if team1_name.lower() == club_name.lower():
-            display_team1 = f"<b><u>{team1_name}</u></b>"
-            # Get opponent's skill rating
-            opponent_skill = opposing_skill_ratings.get(team2_id, "N/A")
-            display_team2 = f"{team2_name} ({opponent_skill})"
+            searched_team_name = team1_name
+            opponent_team_name = team2_name
+            searched_team_rating_value = overall_stats.skillRating if overall_stats else None
+            opponent_team_rating_value = opposing_skill_ratings.get(team2_id, None)
+            for player in match.get('man_of_the_match', []):
+                if player['team_name'].lower() == club_name.lower():
+                    motm_name = player['player_name']
+                    motm_rating = player['rating']
+                elif player['team_name'].lower() == team2_name.lower():
+                    opponent_motm_name = player['player_name']
+                    opponent_motm_rating = player['rating']
+
         elif team2_name.lower() == club_name.lower():
-            display_team2 = f"<b><u>{team2_name}</u></b>"
-            # Get opponent's skill rating
-            opponent_skill = opposing_skill_ratings.get(team1_id, "N/A")
-            display_team1 = f"{team1_name} ({opponent_skill})"
+            searched_team_name = team2_name
+            opponent_team_name = team1_name
+            searched_team_rating_value = overall_stats.skillRating if overall_stats else None
+            opponent_team_rating_value = opposing_skill_ratings.get(team1_id, None)
+            for player in match.get('man_of_the_match', []):
+                if player['team_name'].lower() == club_name.lower():
+                    motm_name = player['player_name']
+                    motm_rating = player['rating']
+                elif player['team_name'].lower() == team1_name.lower():
+                    opponent_motm_name = player['player_name']
+                    opponent_motm_rating = player['rating']
         else:
-            display_team1 = team1_name
-            display_team2 = team2_name
+            searched_team_name = team1_name
+            opponent_team_name = team2_name
+            searched_team_rating_value = opposing_skill_ratings.get(team1_id, None)
+            opponent_team_rating_value = opposing_skill_ratings.get(team2_id, None)
 
-        # Format the team line
-        team_line = f"{TEAM_INDENT}{display_team1} {score} {display_team2}"
-
-        # Extract Man of the Match (MOTM) information
-        motm_list = match.get('man_of_the_match')
-        motm_lines = []
-        if motm_list:
-            for mom in motm_list:
-                mom_player = mom['player_name']
-                mom_rating = mom['rating']
-                mom_team_name = mom['team_name']
-
-                if mom_team_name.lower() == team1_name.lower():
-                    # Align MOTM under team1
-                    motm_indent = " " * (len(TEAM_INDENT) + len(display_team1) + 1 + len(score) + 1)
-                else:
-                    # Align MOTM under team2
-                    motm_indent = " " * (
-                                len(TEAM_INDENT) + len(display_team1) + 1 + len(score) + 1 + len(display_team2))
-
-                motm_line = f"{motm_indent}{mom_player} - {mom_rating}"
-                motm_lines.append(motm_line)
+        # Добавляем перенос строки для длинных имен команд
+        if len(searched_team_name) > 12:
+            searched_team_name_lines = '\n'.join([searched_team_name[i:i+12] for i in range(0, len(searched_team_name), 12)])
         else:
-            # If no MOTM, display "MOTM: None"
-            motm_lines.append(f"{TEAM_INDENT}MOTM: None")
+            searched_team_name_lines = searched_team_name
 
-        # Extract Winner by Disconnect information
-        winner_by_disconnect = match.get('winner_by_disconnect')
-        disconnect_line = "Disconnect" if winner_by_disconnect else ""
+        if len(opponent_team_name) > 12:
+            opponent_team_name_lines = '\n'.join([opponent_team_name[i:i+12] for i in range(0, len(opponent_team_name), 12)])
+        else:
+            opponent_team_name_lines = opponent_team_name
 
-        # Extract Timestamp and Relative Time
-        relative_time = match.get('relative_time', '')
-        timestamp_line = f"{relative_time}"
+        # Формируем строку MOTM с переносом, если необходимо
+        motm_left_display = ""
+        if motm_name is not None and motm_rating is not None:
+            motm_combined = f"{motm_name} - {motm_rating}"
+            if len(motm_combined) > 12:
+                motm_left_display = '\n'.join(motm_combined[i:i + 12] for i in range(0, len(motm_combined), 12))
+            else:
+                motm_left_display = motm_combined
 
-        # Combine all parts
-        parts = [team_line]
-        parts.extend(motm_lines)
-        parts.append(timestamp_line)
-        if disconnect_line:
-            parts.append(disconnect_line)
+        motm_right_display = ""
+        if opponent_motm_name is not None and opponent_motm_rating is not None:
+            opponent_motm_combined = f"{opponent_motm_name} - {opponent_motm_rating}"
+            if len(opponent_motm_combined) > 12:
+                motm_right_display = '\n'.join(opponent_motm_combined[i:i + 12] for i in range(0, len(opponent_motm_combined), 12))
+            else:
+                motm_right_display = opponent_motm_combined
 
-        # Join parts with newline
-        formatted_match = "\n".join(parts)
+        relative_time = match.get('relative_time', 'N/A')
 
-        # Append to the list of formatted matches
-        formatted_matches.append(formatted_match)
-        formatted_matches.append("_____________________")
+        table = pt.PrettyTable(header=False, padding_width=1)
+        table.field_names = ["col1", "col2", "col3"]
 
-    # Skip the last separator
-    final_output = "\n".join(formatted_matches).rstrip("_____________________\n")
-    return final_output
+        table.add_row([searched_team_name_lines, score, opponent_team_name_lines])
 
+        # Добавляем рейтинги команд
+        table.add_row([
+            str(searched_team_rating_value) if searched_team_rating_value is not None else "",
+            "",
+            str(opponent_team_rating_value) if opponent_team_rating_value is not None else ""
+        ])
 
+        # Добавляем MOTM и рейтинг
+        table.add_row([motm_left_display, "", motm_right_display])
+
+        # table.add_row([relative_time, "", ""])
+        table.add_row([relative_time, "", ""])
+
+        formatted_output.append(table.get_string())
+
+    return "\n".join(formatted_output)
 def main():
     """
     Main function to execute the script.
@@ -412,7 +402,6 @@ def main():
 
     except Exception as e:
         print(f"An error occurred while fetching overall stats: {e}")
-
 
 if __name__ == "__main__":
     main()

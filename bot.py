@@ -11,11 +11,12 @@ from telegram.ext import (
 )
 from dotenv import load_dotenv
 from main import get_matches_info, get_overall_stats, format_matches
-from fc_clubs_api.schemas import Platform, ClubSearchInput  # Added ClubSearchInput
-from fc_clubs_api.api import EAFCApiService  # Added EAFCApiService
+from fc_clubs_api.schemas import Platform, ClubSearchInput
+from fc_clubs_api.api import EAFCApiService
 from telegram.error import TelegramError
 from database import add_user, remove_user, get_all_users
-from fc_clubs_api.models import OverallStats  # Import the OverallStats model
+from fc_clubs_api.models import OverallStats
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -35,7 +36,10 @@ if not TELEGRAM_BOT_TOKEN:
     )
     exit(1)
 
-def escape_text_html(text: str) -> str:
+def escape_text_preserve_newlines(text: str) -> str:
+    """
+    Escapes HTML in the text but preserves newlines and other whitespace.
+    """
     return html.escape(text)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,7 +47,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     add_user(user_id)  # Save the user ID
     welcome_message = (
         "👋 Hello! I'm the FC Clubs Bot.\n\n"
-        "Send me the name of a club (e.g., <b>Metallist</b>) and I'll provide you with the latest match information."
+        "Send me the name of a club (e.g., Metallist) and I'll provide you with the latest match information."
     )
     await update.message.reply_text(welcome_message, parse_mode="HTML")
 
@@ -69,7 +73,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     await update.message.reply_text(
-        f"🔍 Fetching match information for <b>{escape_text_html(club_name)}</b>...",
+        f"🔍 Fetching match information for <b>{escape_text_preserve_newlines(club_name)}</b>...",
         parse_mode="HTML",
     )
 
@@ -132,12 +136,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Format the matches with indicators and separators, including overall stats and opposing skill ratings
     formatted_text = format_matches(matches_info, club_name, overall_stats, opposing_skill_ratings)
 
-    # Escape the text for HTML
-    escaped_text = formatted_text  # Assuming format_matches returns HTML-formatted text
+    # Wrap the table in <pre> tags to preserve formatting
+    final_message = f"<pre>{formatted_text}</pre>"
+    # final_message = f"{formatted_text}"
 
-    logger.debug(f"Escaped Text (HTML): {escaped_text}")
+    logger.debug(f"Final Message (HTML): {final_message}")
 
-    if len(escaped_text) > 4000:
+    if len(final_message) > 4096:
+        # Telegram's maximum message length is 4096 characters
         # Send as a document if text is too long
         with open("matches_output.txt", "w", encoding="utf-8") as file:
             file.write(formatted_text)
@@ -151,7 +157,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         try:
             await update.message.reply_text(
-                escaped_text, parse_mode="HTML", disable_web_page_preview=True
+                final_message, parse_mode="HTML", disable_web_page_preview=True
             )
         except TelegramError as e:
             logger.error(f"Failed to send message: {e}")
@@ -181,6 +187,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stop", stop))
+
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
