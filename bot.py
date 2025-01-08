@@ -10,11 +10,12 @@ from telegram.ext import (
     filters,
 )
 from dotenv import load_dotenv
-from main import get_matches_info, format_matches
-from fc_clubs_api.schemas import Platform
+from main import get_matches_info, get_overall_stats, format_matches
+from fc_clubs_api.schemas import Platform, ClubSearchInput  # Added ClubSearchInput
+from fc_clubs_api.api import EAFCApiService  # Added EAFCApiService
 from telegram.error import TelegramError
 from database import add_user, remove_user, get_all_users
-
+from fc_clubs_api.models import OverallStats  # Import the OverallStats model
 # Load environment variables from .env file
 load_dotenv()
 
@@ -75,25 +76,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     platform = Platform.COMMON_GEN5  # Adjust based on your platform enums
 
     try:
+        # Fetch matches information
         matches_info = get_matches_info(club_name, platform)
+
+        if not matches_info:
+            await update.message.reply_text("⚠️ No matches found for the specified club.")
+            return
+
+        # Search for the club to get its ID
+        api_service = EAFCApiService()
+        input_data = ClubSearchInput(clubName=club_name, platform=platform)
+        search_response = api_service.search_club(input_data)
+
+        if not search_response:
+            await update.message.reply_text("⚠️ No clubs found matching the search criteria.")
+            return
+
+        selected_club = search_response[0]
+        selected_club_id = selected_club.clubId
+
+        # Fetch overall stats using the club's ID
+        overall_stats = get_overall_stats(selected_club_id, platform)
+
+        if not overall_stats:
+            await update.message.reply_text("⚠️ No overall stats found for the specified club.")
+            return
+
     except Exception as e:
-        logger.error(f"Error fetching matches: {e}")
+        logger.error(f"Error fetching matches or stats: {e}")
         await update.message.reply_text(
             "❌ An error occurred while fetching match information. Please try again later."
         )
         return
 
-    if not matches_info:
-        await update.message.reply_text("⚠️ No matches found for the specified club.")
-        return
+    # Format the matches with indicators and separators, including overall stats
+    formatted_text = format_matches(matches_info, club_name, overall_stats)
 
-    formatted_text = format_matches(matches_info, club_name)
-
-    escaped_text = formatted_text
+    # Escape the text for HTML
+    escaped_text = formatted_text  # Assuming format_matches returns HTML-formatted text
 
     logger.debug(f"Escaped Text (HTML): {escaped_text}")
 
     if len(escaped_text) > 4000:
+        # Send as a document if text is too long
         with open("matches_output.txt", "w", encoding="utf-8") as file:
             file.write(formatted_text)
         with open("matches_output.txt", "rb") as file:
@@ -126,6 +151,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main():
     from database import initialize_db
+    from fc_clubs_api.api import EAFCApiService  # Ensure EAFCApiService is accessible
+
     initialize_db()  # Initialize the database
 
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()

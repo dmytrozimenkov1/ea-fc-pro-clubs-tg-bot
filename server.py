@@ -4,8 +4,10 @@ import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from database import get_all_users
-from main import get_matches_info, format_matches
-from fc_clubs_api.schemas import Platform
+from main import get_matches_info, get_overall_stats, format_matches
+from fc_clubs_api.schemas import Platform, ClubSearchInput
+from fc_clubs_api.api import EAFCApiService
+from telegram.error import TelegramError
 
 # Load environment variables
 load_dotenv()
@@ -27,7 +29,6 @@ if not TELEGRAM_BOT_TOKEN:
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-
 @app.route('/notify', methods=['POST'])
 def notify():
     """
@@ -45,11 +46,38 @@ def notify():
     platform = Platform.COMMON_GEN5  # Adjust as needed or make it dynamic
 
     try:
+        # Fetch match information
         matches_info = get_matches_info(team_name, platform)
+
         if not matches_info:
             message = f"⚠️ No matches found for the club <b>{team_name}</b>."
         else:
-            message = format_matches(matches_info, team_name)
+            # Initialize API service
+            api_service = EAFCApiService()
+
+            # Search for the club to get its ID
+            input_data = ClubSearchInput(clubName=team_name, platform=platform)
+            search_response = api_service.search_club(input_data)
+
+            if not search_response:
+                message = f"⚠️ No clubs found matching the name <b>{team_name}</b>."
+            else:
+                selected_club = search_response[0]
+                selected_club_id = selected_club.clubId
+
+                # Fetch overall stats using the club's ID
+                overall_stats = get_overall_stats(selected_club_id, platform)
+
+                if not overall_stats:
+                    overall_stats_message = "⚠️ No overall stats found for the specified club."
+                    logger.warning(overall_stats_message)
+                    # You can choose to include or exclude this message
+                    # For consistency, we'll proceed without overall_stats
+                    overall_stats = None
+
+                # Format the matches with indicators and separators, including overall stats
+                message = format_matches(matches_info, team_name, overall_stats)
+
     except Exception as e:
         logger.error(f"Error fetching match information: {e}")
         return jsonify({"error": "Failed to fetch match information."}), 500
@@ -88,7 +116,6 @@ def notify():
         "sent": sent_count,
         "failed": failed_count
     }), 200
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)

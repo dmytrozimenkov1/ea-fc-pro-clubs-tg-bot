@@ -1,7 +1,7 @@
 # fc_clubs_api/models.py
 
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict, List,Optional
 
 # --- Custom Models ---
 
@@ -68,8 +68,8 @@ class Club(BaseModel):
 
 class OverallStats(BaseModel):
     clubId: str
-    bestDivision: str
-    bestFinishGroup: str
+    bestDivision: Optional[str] = None
+    bestFinishGroup: Optional[str] = None
     finishesInDivision1Group1: str
     finishesInDivision2Group1: str
     finishesInDivision3Group1: str
@@ -110,7 +110,6 @@ class OverallStats(BaseModel):
     skillRating: str
     reputationtier: str
     leagueAppearances: str
-
 class MemberCareerStatsMember(BaseModel):
     name: str
     proPos: str
@@ -198,7 +197,8 @@ class MatchClubsData(BaseModel):
     ties: str
     winnerByDnf: str
     wins: str
-    details: MatchClubsDetails
+    details: Optional[MatchClubsDetails] = None  # Updated to be optional
+
 
 class MatchTimeAgo(BaseModel):
     number: int
